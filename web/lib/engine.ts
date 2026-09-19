@@ -278,3 +278,42 @@ export function resolveMarket(store: Store, ticker: string, outcome: Side) {
   market.resolved_outcome = outcome;
   market.yes_price_cents = outcome === "yes" ? 100 : 0;
 }
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * Delete a market and everything attached to it (orders, positions, trades).
+ * A market that hasn't been resolved gives everyone their Macho Bucks back first:
+ * resting bids at their reserved cost, contracts at what was paid for them
+ * (the house market maker is skipped, since its liquidity is free).
+ */
+export function removeMarket(store: Store, ticker: string) {
+  const market = store.markets.find((m) => m.ticker === ticker);
+  if (!market) throw new Error("Unknown market");
+
+  if (market.status !== "resolved") {
+    for (const order of store.orders) {
+      if (order.ticker !== ticker || order.status !== "open") continue;
+      const owner = store.users.find((u) => u.id === order.user_id);
+      // The market maker's bids are house liquidity that was never paid for, so nothing to give back.
+      if (owner && owner.username !== "market_maker") {
+        owner.macho_bucks = round2(owner.macho_bucks + (order.price_cents * order.remaining) / 100);
+      }
+    }
+    for (const p of store.positions) {
+      if (p.ticker !== ticker) continue;
+      const owner = store.users.find((u) => u.id === p.user_id);
+      if (!owner || owner.username === "market_maker") continue;
+      const paid = (p.yes_contracts * p.avg_yes_cents + p.no_contracts * p.avg_no_cents) / 100;
+      owner.macho_bucks = round2(owner.macho_bucks + paid);
+    }
+  }
+
+  store.orders = store.orders.filter((o) => o.ticker !== ticker);
+  store.positions = store.positions.filter((p) => p.ticker !== ticker);
+  store.trades = store.trades.filter((t) => t.ticker !== ticker);
+  store.markets = store.markets.filter((m) => m.ticker !== ticker);
+  if (!store.markets.some((m) => m.event_id === market.event_id)) {
+    store.events = store.events.filter((e) => e.id !== market.event_id);
+  }
+}
