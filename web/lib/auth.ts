@@ -1,6 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
-import { withStore, publicUser } from "./store";
+import { databaseUrl, withStore, publicUser } from "./store";
+import type { PublicUser } from "./types";
 
 // Two separate sessions:
 //   USER_COOKIE  -> id of a `User` (a bettor)
@@ -14,7 +15,7 @@ let warned = false;
 function secret(): string {
   const configured = process.env.SECRET_KEY || process.env.FLASK_SECRET_KEY;
   if (configured) return configured;
-  const db = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  const db = databaseUrl();
   if (process.env.NODE_ENV === "production" && !warned) {
     warned = true;
     console.warn("[cowshi] SECRET_KEY is not set — set it in your Vercel project settings.");
@@ -57,16 +58,15 @@ function signedId(raw: string | undefined): number {
   return value === null ? NaN : Number(value);
 }
 
-/** The signed-in bettor (a `User`). With no valid session it falls back to the demo trader. */
-export async function currentUser() {
+/** The signed-in bettor (a `User`, without their password), or null when nobody is signed in. */
+export async function currentUser(): Promise<PublicUser | null> {
   const jar = await cookies();
   const id = signedId(jar.get(USER_COOKIE)?.value);
+  if (!Number.isInteger(id)) return null;
   return withStore((store) => {
-    const fallback = store.users.find((u) => u.username === "cowboy") ?? store.users[0];
-    const user = Number.isInteger(id) ? publicUser(store, id) : null;
+    const user = publicUser(store, id);
     // The market maker is house liquidity, never a bettor.
-    const bettor = user && user.username !== "market_maker" ? user : null;
-    return bettor ?? publicUser(store, fallback.id);
+    return user && user.username !== "market_maker" ? user : null;
   });
 }
 

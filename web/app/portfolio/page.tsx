@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { currentUser } from "@/lib/auth";
 import { withStore } from "@/lib/store";
-import { formatCents, formatMb } from "@/lib/format";
+import { formatCents, formatMb, maskAccount } from "@/lib/format";
 
 export default async function PortfolioPage() {
   const session = await currentUser();
@@ -15,7 +15,14 @@ export default async function PortfolioPage() {
     const trades = store.trades.filter((t) => t.user_id === user.id).slice(-20).reverse();
     return { user, positions, openOrders, trades, markets: store.markets };
   });
-  if (!data) return null;
+  if (!data) {
+    return (
+      <div className="rounded-2xl border border-line bg-surface p-10 text-center">
+        <h1 className="text-2xl font-semibold">Sign in to see your portfolio</h1>
+        <p className="mt-2 text-muted">Use the Sign in button in the top right with your username and bank account number.</p>
+      </div>
+    );
+  }
   const { user, positions, openOrders, trades, markets } = data;
   const titleFor = (ticker: string) => markets.find((m) => m.ticker === ticker)?.title ?? ticker;
 
@@ -23,7 +30,7 @@ export default async function PortfolioPage() {
     <div className="space-y-6">
       <section className="grid gap-3 md:grid-cols-3">
         <Card label="Macho Bucks" value={formatMb(user.macho_bucks)} />
-        <Card label="Bank account" value={String(user.bank_account_number)} />
+        <Card label="Bank account" value={maskAccount(user.bank_account_number)} />
         <Card label="Open orders" value={String(openOrders.length)} />
       </section>
 

@@ -4,16 +4,18 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { formatMb } from "@/lib/format";
-import type { User } from "@/lib/types";
-
-type Option = { id: number; username: string };
+import type { PublicUser } from "@/lib/types";
 
 export function Header() {
   const pathname = usePathname();
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [users, setUsers] = useState<Option[]>([]);
+  const [user, setUser] = useState<PublicUser | null>(null);
   const [query, setQuery] = useState("");
+  const [signingIn, setSigningIn] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     const load = () =>
@@ -21,7 +23,6 @@ export function Header() {
         .then((r) => r.json())
         .then((data) => {
           setUser(data.user);
-          setUsers(data.users ?? []);
         })
         .catch(() => undefined);
     load();
@@ -30,15 +31,32 @@ export function Header() {
     return () => window.removeEventListener("cowshi:refresh", load);
   }, [pathname]);
 
-  async function switchUser(id: string) {
-    await fetch("/api/session", {
+  async function signIn() {
+    setBusy(true);
+    setError("");
+    const res = await fetch("/api/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: Number(id) }),
+      // The password is the user's bank account number.
+      body: JSON.stringify({ username, password }),
     });
-    router.refresh();
-    const data = await fetch("/api/bootstrap").then((r) => r.json());
+    const data = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) {
+      setError(data.error ?? "Could not sign in");
+      return;
+    }
     setUser(data.user);
+    setSigningIn(false);
+    setUsername("");
+    setPassword("");
+    router.refresh();
+  }
+
+  async function signOut() {
+    await fetch("/api/session", { method: "DELETE" });
+    setUser(null);
+    router.refresh();
   }
 
   const nav = [
@@ -89,17 +107,65 @@ export function Header() {
             <div className="text-[11px] uppercase tracking-wide text-muted">Macho Bucks</div>
             <div className="font-mono text-sm font-semibold">{user ? formatMb(user.macho_bucks) : "—"}</div>
           </div>
-          <select
-            value={user?.id ?? ""}
-            onChange={(e) => switchUser(e.target.value)}
-            className="rounded-full border border-line bg-surface px-3 py-2 text-sm"
-          >
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.username}
-              </option>
-            ))}
-          </select>
+          {user ? (
+            <div className="flex items-center gap-2">
+              <span className="rounded-full border border-line bg-surface px-3 py-2 text-sm">{user.username}</span>
+              <button
+                type="button"
+                onClick={signOut}
+                className="rounded-full px-3 py-2 text-sm text-muted hover:bg-surface-2"
+              >
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setSigningIn((open) => !open)}
+                className="rounded-full bg-yes-deep px-4 py-2 text-sm font-semibold text-white"
+              >
+                Sign in
+              </button>
+              {signingIn ? (
+                <div className="absolute right-0 top-full z-40 mt-2 w-72 rounded-2xl border border-line bg-surface p-4 shadow-xl">
+                  <div className="mb-3 text-sm font-semibold">Sign in to bet</div>
+                  <label className="mb-3 block text-sm">
+                    Username
+                    <input
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      autoComplete="username"
+                      className="mt-1 w-full rounded-lg border border-line px-3 py-2"
+                    />
+                  </label>
+                  <label className="mb-3 block text-sm">
+                    Bank account number
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value.replace(/\D/g, ""))}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && username && password) signIn();
+                      }}
+                      autoComplete="current-password"
+                      className="mt-1 w-full rounded-lg border border-line px-3 py-2 font-mono"
+                    />
+                  </label>
+                  {error ? <div className="mb-3 text-sm text-no-text">{error}</div> : null}
+                  <button
+                    type="button"
+                    disabled={busy || !username || !password}
+                    onClick={signIn}
+                    className="w-full rounded-xl bg-yes-deep py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {busy ? "Signing in…" : "Sign in"}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          )}
         </div>
       </div>
     </header>

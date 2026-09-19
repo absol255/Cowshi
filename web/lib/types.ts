@@ -17,6 +17,9 @@ export type User = {
   created_at: string;
 };
 
+/** A User without the bank account number, which doubles as the bettor's password. */
+export type PublicUser = Omit<User, "bank_account_number">;
+
 export type Admin = {
   id: number;
   username: string;

@@ -70,7 +70,7 @@ export default async function MarketPage({
           ) : null}
         </div>
       </div>
-      <TradeTicket market={market} position={position} />
+      <TradeTicket market={market} position={position} signedIn={Boolean(user)} />
     </div>
   );
 }

@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
 import { matchBuy, matchSell } from "@/lib/engine";
 import { contractsForAmount, validateBetAmount, validateContracts } from "@/lib/rules";
-import { toMarketView, withStore } from "@/lib/store";
+import { toMarketView, toPublicUser, withStore } from "@/lib/store";
 import type { Side } from "@/lib/types";
 
 export async function POST(request: Request) {
   const user = await currentUser();
-  if (!user) return NextResponse.json({ error: "Pick a trader first" }, { status: 401 });
+  if (!user) return NextResponse.json({ error: "Sign in to place a bet" }, { status: 401 });
 
   let body: {
     ticker?: string;
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
           ? matchSell(store, user.id, ticker, side, limit, quantity)
           : matchBuy(store, user.id, ticker, side, limit, quantity);
       const fresh = store.users.find((u) => u.id === user.id);
-      return { ...outcome, user: fresh, market: toMarketView(store, ticker) };
+      return { ...outcome, user: fresh ? toPublicUser(fresh) : null, market: toMarketView(store, ticker) };
     });
     return NextResponse.json(result);
   } catch (error) {

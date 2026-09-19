@@ -26,9 +26,11 @@ const digitsOnly = (value: string) => value.replace(/\D/g, "").slice(0, 9);
 export function TradeTicket({
   market,
   position,
+  signedIn,
 }: {
   market: MarketView;
   position: Position | null;
+  signedIn: boolean;
 }) {
   const router = useRouter();
   const [action, setAction] = useState<Action>("buy");
@@ -208,12 +210,15 @@ export function TradeTicket({
           Position: {position.yes_contracts} Yes · {position.no_contracts} No
         </div>
       ) : null}
+      {signedIn ? null : (
+        <div className="mb-3 text-sm text-muted">Sign in (top right) to place a bet.</div>
+      )}
       {tooSmall ? <div className="mb-3 text-sm text-no-text">That bet is too small at this price.</div> : null}
       {error ? <div className="mb-3 text-sm text-no-text">{error}</div> : null}
       {notice ? <div className="mb-3 text-sm text-yes-text">{notice}</div> : null}
       <button
         type="button"
-        disabled={busy || !valid || market.status !== "open"}
+        disabled={busy || !valid || !signedIn || market.status !== "open"}
         onClick={submit}
         className={`w-full rounded-xl py-3 text-sm font-semibold text-white disabled:opacity-50 ${
           side === "yes" ? "bg-yes-deep" : "bg-no-deep"

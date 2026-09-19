@@ -18,3 +18,9 @@ export function formatVolume(amount: number) {
 export function centsToMb(cents: number, qty: number) {
   return (cents / 100) * qty;
 }
+
+/** Shows only the last two digits, e.g. 1001 -> ••01. */
+export function maskAccount(value: number | string) {
+  const s = String(value);
+  return "•".repeat(Math.max(0, s.length - 2)) + s.slice(-2);
+}

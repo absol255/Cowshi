@@ -1,13 +1,13 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { Event, MarketView, Store } from "./types";
+import type { Event, MarketView, PublicUser, Store, User } from "./types";
 import { aggregateBook, lastChange } from "./engine";
 import { createSeed } from "./seed";
 
 // Persistence
 // -----------
 // The whole book (users, admins, markets, orders, ...) is one JSON document.
-//   - DATABASE_URL / POSTGRES_URL set  -> stored in Postgres (use this on Vercel)
+//   - DATABASE_URL (or POSTGRES_URL) set -> stored in Postgres (use this on Vercel)
 //   - running locally without a URL     -> stored in web/data/store.json, as before
 //   - on Vercel without a URL           -> in memory only; resets on every cold start
 // Writes use optimistic concurrency (a version number) so parallel serverless
@@ -28,6 +28,18 @@ type Globals = typeof globalThis & {
 };
 const g = globalThis as Globals;
 
+/** Postgres connection string from whichever variable your host or integration provides. */
+export function databaseUrl(): string | undefined {
+  return (
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_PRISMA_URL ||
+    process.env.DATABASE_URL_UNPOOLED ||
+    process.env.POSTGRES_URL_NON_POOLING ||
+    undefined
+  );
+}
+
 function normalizeDatabaseUrl(raw: string): string {
   let url = raw.startsWith("postgres://") ? `postgresql://${raw.slice("postgres://".length)}` : raw;
   // TLS is configured on the pool below, so drop sslmode to avoid driver-version differences.
@@ -43,7 +55,9 @@ function postgresBackend(rawUrl: string): Backend {
   const getPool = () => {
     ready ??= (async () => {
       const { Pool } = await import("pg");
-      const pool = new Pool({ connectionString: url, max: 1, ssl: local ? undefined : true });
+      // Set DATABASE_SSL=no-verify only if your provider uses a certificate Node can't verify.
+      const ssl = local ? undefined : process.env.DATABASE_SSL === "no-verify" ? { rejectUnauthorized: false } : true;
+      const pool = new Pool({ connectionString: url, max: 1, ssl });
       await pool.query(
         `CREATE TABLE IF NOT EXISTS cowshi_store (
            id integer PRIMARY KEY,
@@ -137,12 +151,12 @@ function memoryBackend(): Backend {
 
 function backend(): Backend {
   if (g.__cowshiBackend) return g.__cowshiBackend;
-  const url = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  const url = databaseUrl();
   if (url) {
     g.__cowshiBackend = postgresBackend(url);
   } else if (process.env.VERCEL) {
     console.warn(
-      "[cowshi] No DATABASE_URL or POSTGRES_URL set — data is kept in memory and will reset. Add a Postgres database in Vercel.",
+      "[cowshi] No DATABASE_URL set — data is kept in memory and will reset. Add a Postgres database in Vercel.",
     );
     g.__cowshiBackend = memoryBackend();
   } else {
@@ -201,6 +215,14 @@ function decorate(store: Store, market: Store["markets"][number], event: Event):
   };
 }
 
-export function publicUser(store: Store, id: number) {
-  return store.users.find((u) => u.id === id) ?? null;
+/** Drops the bank account number (the bettor's password) so it never leaves the server by accident. */
+export function toPublicUser(user: User): PublicUser {
+  const { bank_account_number: _secret, ...rest } = user;
+  void _secret;
+  return rest;
+}
+
+export function publicUser(store: Store, id: number): PublicUser | null {
+  const user = store.users.find((u) => u.id === id);
+  return user ? toPublicUser(user) : null;
 }
