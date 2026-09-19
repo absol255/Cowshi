@@ -1,1 +1,0 @@
-import{r as e}from"./jsx-runtime-BkSabwWG.js";import{R as t,f as n}from"./api-BX6ENpj2.js";var r=e(t(),1);function i(e){let t=n();return r.useCallback(n=>t.navigate({...n,from:n.from??e?.from}),[e?.from,t])}export{i as t};
