@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Cowshi",
+      "hasCanvas": false,
+      "bodyTextLen": 1722,
+      "bodyTextHash": "3f51cef5c481b5e34b650f342eb3a50b626b9c7cce7918326fbd968fd5dae21a",
+      "bodyTextPrefix": "C Cowshi Markets Portfolio Admin Log in to bet Prediction market",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Cowshi",
+      "hasCanvas": false,
+      "bodyTextLen": 1691,
+      "bodyTextHash": "1e8c69ac1e8fe253197fd71bd424d38d4704bc3d924afc0779892671d9e22386",
+      "bodyTextPrefix": "C Cowshi Log in to bet Markets Portfolio Admin Prediction market",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}
