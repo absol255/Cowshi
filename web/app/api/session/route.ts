@@ -30,6 +30,10 @@ export async function POST(request: Request) {
   );
   const ok = user !== null && /^\d+$/.test(password) && sameText(password, String(user.bank_account_number));
   if (!ok || !user) {
+    // Only server logs (Vercel -> Logs) say why; the browser just gets a generic message.
+    console.warn(
+      `[cowshi] sign-in failed for "${username}": ${user ? "bank_account_number does not match" : 'no such username in the users table'}`,
+    );
     recordFailure(key);
     return NextResponse.json({ error: "Wrong username or account number" }, { status: 401 });
   }

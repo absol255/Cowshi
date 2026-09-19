@@ -3,26 +3,21 @@ import path from "node:path";
 import type { Event, MarketView, PublicUser, Store, User } from "./types";
 import { aggregateBook, lastChange } from "./engine";
 import { createSeed } from "./seed";
+import { postgresBackend, type Backend, type Snapshot } from "./postgres";
 
 // Persistence
 // -----------
-// The whole book (users, admins, markets, orders, ...) is one JSON document.
-//   - DATABASE_URL (or POSTGRES_URL) set -> stored in Postgres (use this on Vercel)
-//   - running locally without a URL     -> stored in web/data/store.json, as before
+//   - DATABASE_URL (or POSTGRES_URL) set -> Postgres (use this on Vercel). Bettors and admins are
+//                                           rows in the `users` and `admins` tables from models.py;
+//                                           see postgres.ts.
+//   - running locally without a URL     -> one JSON file, web/data/store.json
 //   - on Vercel without a URL           -> in memory only; resets on every cold start
 // Writes use optimistic concurrency (a version number) so parallel serverless
 // invocations can't overwrite each other: a losing write is retried on fresh data.
 
-type Snapshot = { store: Store; version: number };
-
-interface Backend {
-  load(): Promise<Snapshot>;
-  /** Returns false when someone else saved first. */
-  save(next: Store, expectedVersion: number): Promise<boolean>;
-}
-
 type Globals = typeof globalThis & {
   __cowshiBackend?: Backend;
+  __cowshiBackendKind?: "postgres" | "file" | "memory";
   __cowshiMemory?: Snapshot;
   __cowshiLock?: Promise<unknown>;
 };
@@ -38,66 +33,6 @@ export function databaseUrl(): string | undefined {
     process.env.POSTGRES_URL_NON_POOLING ||
     undefined
   );
-}
-
-function normalizeDatabaseUrl(raw: string): string {
-  let url = raw.startsWith("postgres://") ? `postgresql://${raw.slice("postgres://".length)}` : raw;
-  // TLS is configured on the pool below, so drop sslmode to avoid driver-version differences.
-  url = url.replace(/([?&])sslmode=[^&]*&?/, "$1").replace(/[?&]$/, "");
-  return url;
-}
-
-function postgresBackend(rawUrl: string): Backend {
-  const url = normalizeDatabaseUrl(rawUrl);
-  const local = /localhost|127\.0\.0\.1/.test(url);
-  let ready: Promise<import("pg").Pool> | undefined;
-
-  const getPool = () => {
-    ready ??= (async () => {
-      const { Pool } = await import("pg");
-      // Set DATABASE_SSL=no-verify only if your provider uses a certificate Node can't verify.
-      const ssl = local ? undefined : process.env.DATABASE_SSL === "no-verify" ? { rejectUnauthorized: false } : true;
-      const pool = new Pool({ connectionString: url, max: 1, ssl });
-      await pool.query(
-        `CREATE TABLE IF NOT EXISTS cowshi_store (
-           id integer PRIMARY KEY,
-           version bigint NOT NULL DEFAULT 0,
-           data jsonb NOT NULL
-         )`,
-      );
-      return pool;
-    })();
-    return ready;
-  };
-
-  const read = async (pool: import("pg").Pool) => {
-    const res = await pool.query("SELECT version, data FROM cowshi_store WHERE id = 1");
-    return res.rows[0] as { version: string; data: Store } | undefined;
-  };
-
-  return {
-    async load() {
-      const pool = await getPool();
-      let row = await read(pool);
-      if (!row) {
-        await pool.query(
-          "INSERT INTO cowshi_store (id, version, data) VALUES (1, 0, $1::jsonb) ON CONFLICT (id) DO NOTHING",
-          [JSON.stringify(createSeed())],
-        );
-        row = await read(pool);
-      }
-      if (!row) throw new Error("Could not initialise the Cowshi store");
-      return { store: row.data, version: Number(row.version) };
-    },
-    async save(next, expectedVersion) {
-      const pool = await getPool();
-      const res = await pool.query(
-        "UPDATE cowshi_store SET data = $1::jsonb, version = version + 1 WHERE id = 1 AND version = $2",
-        [JSON.stringify(next), expectedVersion],
-      );
-      return res.rowCount === 1;
-    },
-  };
 }
 
 function fileBackend(): Backend {
@@ -118,7 +53,7 @@ function fileBackend(): Backend {
         return { store, version: 0 };
       }
     },
-    save(next, expectedVersion) {
+    save(next, _prev, expectedVersion) {
       // Serialise check-and-write so parallel requests in one dev server can't interleave.
       const run = async () => {
         const current = await this.load();
@@ -141,7 +76,7 @@ function memoryBackend(): Backend {
       g.__cowshiMemory ??= { store: createSeed(), version: 0 };
       return { store: JSON.parse(JSON.stringify(g.__cowshiMemory.store)), version: g.__cowshiMemory.version };
     },
-    async save(next, expectedVersion) {
+    async save(next, _prev, expectedVersion) {
       if (!g.__cowshiMemory || g.__cowshiMemory.version !== expectedVersion) return false;
       g.__cowshiMemory = { store: next, version: expectedVersion + 1 };
       return true;
@@ -154,15 +89,24 @@ function backend(): Backend {
   const url = databaseUrl();
   if (url) {
     g.__cowshiBackend = postgresBackend(url);
+    g.__cowshiBackendKind = "postgres";
   } else if (process.env.VERCEL) {
     console.warn(
       "[cowshi] No DATABASE_URL set — data is kept in memory and will reset. Add a Postgres database in Vercel.",
     );
     g.__cowshiBackend = memoryBackend();
+    g.__cowshiBackendKind = "memory";
   } else {
     g.__cowshiBackend = fileBackend();
+    g.__cowshiBackendKind = "file";
   }
   return g.__cowshiBackend;
+}
+
+/** Where data is stored right now: "postgres", "file" (local dev) or "memory" (Vercel without a database). */
+export function storageKind(): "postgres" | "file" | "memory" {
+  backend();
+  return g.__cowshiBackendKind!;
 }
 
 const MAX_ATTEMPTS = 6;
@@ -180,7 +124,7 @@ export async function withStore<T>(fn: (store: Store) => T | Promise<T>): Promis
     const draft = JSON.parse(before) as Store;
     const result = await fn(draft);
     if (JSON.stringify(draft) === before) return result;
-    if (await b.save(draft, version)) return result;
+    if (await b.save(draft, store, version)) return result;
   }
   throw new Error("The book is busy — please try again");
 }

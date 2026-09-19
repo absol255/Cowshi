@@ -66,7 +66,7 @@ export function createSeed(): Store {
 
   store.admins.push({
     id: nextId(store),
-    username: "admin",
+    username: (process.env.ADMIN_USERNAME ?? "").trim() || "admin",
     password_hash: hashPassword((process.env.ADMIN_PASSWORD ?? "").trim() || "cowshi"),
   });
 

@@ -134,7 +134,7 @@ export async function POST(request: Request) {
             throw new Error("That username is taken");
           }
           store.users.push({
-            id: nextId(store),
+            id: Math.max(0, ...store.users.map((u) => u.id)) + 1,
             username,
             macho_bucks: parseBalance(body.macho_bucks ?? 1000),
             bank_account_number: parseAccount(body.bank_account_number),

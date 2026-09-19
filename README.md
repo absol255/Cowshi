@@ -4,15 +4,30 @@ Kalshi-style prediction markets, settled in **Macho Bucks**.
 
 The Python models in `models.py` (`User`, `Admin`, plus events/markets/orders/positions/trades) are the source of truth. The Next.js app in `web/` mirrors them in `web/lib/types.ts`, in dark mode — light blue for Yes, pink for No.
 
+## Where the data lives
+
+With a Postgres URL set, the app uses the same tables as `models.py`:
+
+- **`users`** (`id`, `username`, `macho_bucks`, `created_at`, `bank_account_number`) holds every bettor. This is `models.User`.
+- **`admins`** (`id`, `username`, `password_hash`) holds every admin. This is `models.Admin`.
+
+If those tables already exist, for example from the Flask app, they are used exactly as they are, so your existing bettors and admins just work. If they don't exist they are created with the same columns as `models.py`. Existing rows are never deleted or overwritten by the app. It only updates a bettor's balance when they trade, or when an admin edits it.
+
+Events, markets, orders, positions and trades are kept as one JSON document in a table called `cowshi_state`. A bet writes the bettor's balance in `users` and the document in a single transaction, so they can't get out of step. The market maker (`market_maker`) is added as a row in `users`.
+
+Open `/api/health` to see where data is coming from and how many bettors, admins and markets it found. It shows counts only.
+
 ## Who is who
 
 - **Bettors are `User` records.** You sign in from the header with your **username** and use your **`bank_account_number` as the password**. The market maker can't sign in.
 - **Admins are `Admin` records.** They sign in at `/admin` with a Werkzeug-format password hash (the same format `Admin.set_password` produces in `models.py`). Admins manage markets and bettors; they don't trade.
-- **`ADMIN_PASSWORD` is the password for the `admin` account.** Whenever it's set it wins, even if the database was seeded earlier with a different password. Change it in Vercel, redeploy, and it takes effect on the next sign-in.
+- Admins sign in with the `password_hash` stored in the `admins` table. Werkzeug hashes (`scrypt:` and `pbkdf2:`) from the Flask side work.
+- **`ADMIN_PASSWORD` is an extra way in.** When it's set, the account named `ADMIN_USERNAME` (default `admin`) signs in with that password. The row is created or refreshed in the `admins` table to match. Change it in Vercel, redeploy, and it takes effect on the next sign-in. Other admins in the table are unaffected.
 - The two sessions are separate signed cookies, so a bettor can't reach admin actions and an admin isn't a bettor.
+- If a sign-in fails, Vercel → Logs shows why (for example "no such username in the users table" or "bank_account_number does not match"). The browser only shows a generic message.
 - Sign-in is rate limited (5 wrong tries locks that username for 5 minutes). Account numbers are short, so treat this as demo-level security.
 
-Demo bettors (username → password): `cowboy` → `1001`, `milo` → `1002`, `daisy` → `1003`.
+The demo bettors `cowboy` (1001), `milo` (1002) and `daisy` (1003) are only added to a **completely empty** `users` table. If you already have bettors, no demo bettors are added.
 
 ## Replacing the test markets with real ones
 
@@ -23,7 +38,7 @@ Sign in at `/admin`:
 - **Markets → Yes / No** settles a market when the outcome is known.
 - **Bettors** shows each bettor's bank account number (their password) and balance, lets you change either, and lets you add bettors.
 
-For a brand-new database, the starting markets and demo bettors come from `web/lib/seed.ts`. Edit the `EVENTS` list and the `users` list there before the first request.
+For a brand-new database the app starts with demo markets. Set `SEED_DEMO_MARKETS=false` before the first request to start with none, or edit the `EVENTS` list in `web/lib/seed.ts`.
 
 ## Betting rules
 
@@ -51,8 +66,8 @@ Without a database URL, local data is kept in `web/data/store.json`. Delete that
 3. Under **Settings → Environment Variables**, add:
    - `DATABASE_URL` — your Postgres connection string. `POSTGRES_URL` also works, and so do the variables the Vercel Postgres/Neon integration sets automatically.
    - `SECRET_KEY` — a long random string (`openssl rand -hex 32`). It signs session cookies.
-   - `ADMIN_PASSWORD` — the password for the `admin` account. Changing it later needs a redeploy to take effect.
-4. Deploy. The first request creates one table (`cowshi_store`) and seeds the markets and demo bettors.
+   - `ADMIN_PASSWORD` — optional. The password for the `admin` account (or `ADMIN_USERNAME`). Changing it later needs a redeploy to take effect.
+4. Deploy. The first request creates any missing tables (`users`, `admins`, `cowshi_state`) and adds the demo markets. Older versions of this app stored everything in a table called `cowshi_store`. That table is no longer used and can be dropped.
 
 Notes:
 - Without a database URL on Vercel the app runs but keeps data in memory, and it resets on cold starts.
