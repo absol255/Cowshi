@@ -9,7 +9,10 @@ const CATEGORIES: Category[] = ["Politics", "Sports", "Culture", "Campus", "Econ
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export async function GET() {
-  if (!(await isAdmin())) return NextResponse.json({ admin: false });
+  if (!(await isAdmin())) {
+    const noAdmins = await withStore((store) => store.admins.length === 0);
+    return NextResponse.json({ admin: false, noAdmins });
+  }
   // Admins can see bettors' bank account numbers (their passwords); nobody else can.
   const users = await withStore((store) =>
     store.users

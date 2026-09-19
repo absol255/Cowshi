@@ -1,15 +1,9 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { timingSafeEqual } from "node:crypto";
 import { USER_COOKIE, sessionCookieOptions, signValue } from "@/lib/auth";
 import { clearFailures, lockedFor, recordFailure } from "@/lib/rate-limit";
+import { bettorError } from "@/lib/login-errors";
 import { toPublicUser, withStore } from "@/lib/store";
-
-function sameText(a: string, b: string) {
-  const x = Buffer.from(a);
-  const y = Buffer.from(b);
-  return x.length === y.length && timingSafeEqual(x, y);
-}
 
 // Sign a bettor in. The password is the `User`'s bank_account_number.
 export async function POST(request: Request) {
@@ -28,14 +22,16 @@ export async function POST(request: Request) {
       store.users.find((u) => u.username.toLowerCase() === username.toLowerCase() && u.username !== "market_maker") ??
       null,
   );
-  const ok = user !== null && /^\d+$/.test(password) && sameText(password, String(user.bank_account_number));
+  // Spaces and dashes are ignored, so "1001 " and "1-0-0-1" both work. Compared as numbers.
+  const typed = password.replace(/[\s-]/g, "");
+  const stored = user ? Number(String(user.bank_account_number).trim()) : NaN;
+  const ok = user !== null && /^\d{1,15}$/.test(typed) && Number.isInteger(stored) && Number(typed) === stored;
   if (!ok || !user) {
-    // Only server logs (Vercel -> Logs) say why; the browser just gets a generic message.
     console.warn(
-      `[cowshi] sign-in failed for "${username}": ${user ? "bank_account_number does not match" : 'no such username in the users table'}`,
+      `[cowshi] sign-in failed for "${username}": ${user ? "bank_account_number does not match" : "no such username in the users table"}`,
     );
     recordFailure(key);
-    return NextResponse.json({ error: "Wrong username or account number" }, { status: 401 });
+    return NextResponse.json({ error: bettorError(username, user !== null) }, { status: 401 });
   }
 
   clearFailures(key);

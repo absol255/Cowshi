@@ -8,9 +8,9 @@ import { postgresBackend, type Backend, type Snapshot } from "./postgres";
 // Persistence
 // -----------
 //   - DATABASE_URL (or POSTGRES_URL) set -> Postgres (use this on Vercel). Bettors and admins are
-//                                           rows in the `users` and `admins` tables from models.py;
+//                                           rows in the `users` and `admins` tables;
 //                                           see postgres.ts.
-//   - running locally without a URL     -> one JSON file, web/data/store.json
+//   - running locally without a URL     -> one JSON file, data/store.json
 //   - on Vercel without a URL           -> in memory only; resets on every cold start
 // Writes use optimistic concurrency (a version number) so parallel serverless
 // invocations can't overwrite each other: a losing write is retried on fresh data.

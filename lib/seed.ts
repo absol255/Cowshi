@@ -64,11 +64,16 @@ export function createSeed(): Store {
   }
   const mmId = store.users.find((u) => u.username === "market_maker")!.id;
 
-  store.admins.push({
-    id: nextId(store),
-    username: (process.env.ADMIN_USERNAME ?? "").trim() || "admin",
-    password_hash: hashPassword((process.env.ADMIN_PASSWORD ?? "").trim() || "cowshi"),
-  });
+  // No default password on a real deployment: set ADMIN_PASSWORD to get an admin.
+  // (Locally, with no variable set, the admin is "admin" / "cowshi".)
+  const adminPassword = (process.env.ADMIN_PASSWORD ?? "").trim() || (process.env.NODE_ENV === "production" ? "" : "cowshi");
+  if (adminPassword) {
+    store.admins.push({
+      id: nextId(store),
+      username: (process.env.ADMIN_USERNAME ?? "").trim() || "admin",
+      password_hash: hashPassword(adminPassword),
+    });
+  }
 
   const catalog: Array<{
     slug: string;

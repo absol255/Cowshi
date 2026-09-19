@@ -1,77 +1,99 @@
 # Cowshi
 
-Kalshi-style prediction markets, settled in **Macho Bucks**.
+Kalshi-style prediction markets, settled in **Macho Bucks**. A Next.js (TypeScript) app with a Postgres database, in dark mode: light blue for Yes, pink for No.
 
-The Python models in `models.py` (`User`, `Admin`, plus events/markets/orders/positions/trades) are the source of truth. The Next.js app in `web/` mirrors them in `web/lib/types.ts`, in dark mode — light blue for Yes, pink for No.
+## How it works
 
-## Where the data lives
-
-With a Postgres URL set, the app uses the same tables as `models.py`:
-
-- **`users`** (`id`, `username`, `macho_bucks`, `created_at`, `bank_account_number`) holds every bettor. This is `models.User`.
-- **`admins`** (`id`, `username`, `password_hash`) holds every admin. This is `models.Admin`.
-
-If those tables already exist, for example from the Flask app, they are used exactly as they are, so your existing bettors and admins just work. If they don't exist they are created with the same columns as `models.py`. Existing rows are never deleted or overwritten by the app. It only updates a bettor's balance when they trade, or when an admin edits it.
-
-Events, markets, orders, positions and trades are kept as one JSON document in a table called `cowshi_state`. A bet writes the bettor's balance in `users` and the document in a single transaction, so they can't get out of step. The market maker (`market_maker`) is added as a row in `users`.
-
-Open `/api/health` to see where data is coming from and how many bettors, admins and markets it found. It shows counts only.
-
-## Who is who
-
-- **Bettors are `User` records.** You sign in from the header with your **username** and use your **`bank_account_number` as the password**. The market maker can't sign in.
-- **Admins are `Admin` records.** They sign in at `/admin` with a Werkzeug-format password hash (the same format `Admin.set_password` produces in `models.py`). Admins manage markets and bettors; they don't trade.
-- Admins sign in with the `password_hash` stored in the `admins` table. Werkzeug hashes (`scrypt:` and `pbkdf2:`) from the Flask side work.
-- **`ADMIN_PASSWORD` is an extra way in.** When it's set, the account named `ADMIN_USERNAME` (default `admin`) signs in with that password. The row is created or refreshed in the `admins` table to match. Change it in Vercel, redeploy, and it takes effect on the next sign-in. Other admins in the table are unaffected.
+- **Bettors** are rows in the `users` table (`id`, `username`, `macho_bucks`, `created_at`, `bank_account_number`). A bettor signs in with their **username** and use their **`bank_account_number` as the password**.
+- **Admins** are rows in the `admins` table (`id`, `username`, `password_hash`). They sign in at `/admin` to list, settle and remove markets and to manage bettors.
 - The two sessions are separate signed cookies, so a bettor can't reach admin actions and an admin isn't a bettor.
-- If a sign-in fails, Vercel → Logs shows why (for example "no such username in the users table" or "bank_account_number does not match"). The browser only shows a generic message.
-- Sign-in is rate limited (5 wrong tries locks that username for 5 minutes). Account numbers are short, so treat this as demo-level security.
+- **If the `users` and `admins` tables already exist, they're used exactly as they are.** Existing rows are never deleted or overwritten. The app only changes a bettor's balance when they trade or when an admin edits it. If the tables don't exist, they're created.
+- Markets, orders, positions and trades are kept as one JSON document in a table called `cowshi_state`. A bet updates the bettor's row in `users` and that document in a single transaction, so they can't get out of step. The house market maker is a row in `users` called `market_maker`.
 
-The demo bettors `cowboy` (1001), `milo` (1002) and `daisy` (1003) are only added to a **completely empty** `users` table. If you already have bettors, no demo bettors are added.
+### Passwords
 
-## Replacing the test markets with real ones
+- Admin passwords are checked against `admins.password_hash`. Werkzeug-style hashes (`scrypt:...` and `pbkdf2:...`) work.
+- If `password_hash` holds a plain-text password, it's accepted once and replaced with a proper hash.
+- `ADMIN_PASSWORD` (and optionally `ADMIN_USERNAME`, default `admin`) is always a way in: that account is created or refreshed to match. There's no default password on a real deployment.
+- Bettor account numbers can be typed with spaces or dashes. Sign-in is rate limited (5 wrong tries locks that username for 5 minutes, per server instance), and account numbers are short, so treat it as demo-level security.
 
-Sign in at `/admin`:
+### Betting rules
 
-- **Markets → Remove** deletes a test market (or **Remove all**). Bettors get back what they paid for open orders and contracts, so nobody loses Macho Bucks.
-- **List a market** adds a real one: title, category, resolution rules, starting Yes chance, and close date. The market maker posts opening bids so it can be traded straight away.
-- **Markets → Yes / No** settles a market when the outcome is known.
-- **Bettors** shows each bettor's bank account number (their password) and balance, lets you change either, and lets you add bettors.
+- The minimum bet is **1 Macho Buck**, in **whole numbers**. Buying takes a bet amount and buys as many contracts as it covers at your limit price. It never spends more than the bet. Selling takes whole contracts.
+- The rules live in `lib/rules.ts` and are enforced in the trade ticket and again in `POST /api/trade`.
 
-For a brand-new database the app starts with demo markets. Set `SEED_DEMO_MARKETS=false` before the first request to start with none, or edit the `EVENTS` list in `web/lib/seed.ts`.
+### Managing markets and bettors (`/admin`)
 
-## Betting rules
+- **List a market:** title, category, rules, starting Yes chance, close date.
+- **Yes / No:** settle a market. **Remove:** delete a market and give bettors back what they paid.
+- **Bettors:** see and change each bettor's bank account number and balance, and add bettors.
 
-- The minimum bet is **1 Macho Buck**, and bets are **whole numbers** of Macho Bucks.
-- Buying takes a bet amount and buys as many contracts as it covers at your limit price. It never spends more than the bet.
-- Selling takes a whole number of contracts.
-- The rules live in `web/lib/rules.ts` and are enforced in the trade ticket and again in `POST /api/trade`.
+A brand-new database starts with demo markets (and demo bettors `cowboy` 1001, `milo` 1002, `daisy` 1003 only if `users` is completely empty). Set `SEED_DEMO_MARKETS=false` before the first visit to start with no markets.
+
+## Environment variables
+
+| Name | Required | What it is |
+| --- | --- | --- |
+| `DATABASE_URL` | yes | Postgres connection string. `POSTGRES_URL` and the variables the Vercel/Neon integration sets also work. |
+| `SECRET_KEY` | yes | Long random string that signs session cookies. `openssl rand -hex 32` |
+| `ADMIN_PASSWORD` | recommended | Password for the admin account. Needed if your `admins` table is empty. |
+| `ADMIN_USERNAME` | no | Username for that account. Default `admin`. |
+| `SEED_DEMO_MARKETS` | no | `false` = start a new database with no markets. |
+| `GENERIC_LOGIN_ERRORS` | no | `true` = sign-in errors just say "wrong username or password". |
+| `DATABASE_SSL` | no | `no-verify` only if your database's TLS certificate can't be verified. |
 
 ## Run locally
 
 ```bash
-cd web
 npm install
+cp .env.example .env.local   # fill in DATABASE_URL etc., or leave DATABASE_URL empty
 npm run dev
 ```
 
-Open <http://localhost:3000>. The admin login is `admin` with the `ADMIN_PASSWORD` from `web/.env.local`, or `cowshi` if that isn't set.
+Open <http://localhost:3000>. With no `DATABASE_URL`, data is kept in `data/store.json` (delete it to reset) and the admin is `admin` / `cowshi` unless you set `ADMIN_PASSWORD`.
 
-Without a database URL, local data is kept in `web/data/store.json`. Delete that file to reset. To use Postgres locally, put `DATABASE_URL=postgres://...` in `web/.env.local`.
+## Deploy to Vercel, start to finish
 
-## Deploy to Vercel
+**1. Put the code on GitHub.** This repo is a plain Next.js app: `package.json` is at the top level. Replace everything in your GitHub repo with these files (delete the old `web/` folder, `models.py`, `config.py`, `requirements.txt`, `pyproject.toml` and `static/`), then:
 
-1. Push this repo to GitHub and import it in Vercel.
-2. In **Project Settings → General**, set **Root Directory** to `web`.
-3. Under **Settings → Environment Variables**, add:
-   - `DATABASE_URL` — your Postgres connection string. `POSTGRES_URL` also works, and so do the variables the Vercel Postgres/Neon integration sets automatically.
-   - `SECRET_KEY` — a long random string (`openssl rand -hex 32`). It signs session cookies.
-   - `ADMIN_PASSWORD` — optional. The password for the `admin` account (or `ADMIN_USERNAME`). Changing it later needs a redeploy to take effect.
-4. Deploy. The first request creates any missing tables (`users`, `admins`, `cowshi_state`) and adds the demo markets. Older versions of this app stored everything in a table called `cowshi_store`. That table is no longer used and can be dropped.
+```bash
+npm install          # refreshes package-lock.json (the pg package was added)
+git add -A
+git commit -m "Pure Next.js Cowshi"
+git push
+```
 
-Notes:
-- Without a database URL on Vercel the app runs but keeps data in memory, and it resets on cold starts.
-- If your provider's TLS certificate fails to verify, set `DATABASE_SSL=no-verify`.
-- Run `npm install` in `web/` and commit the updated `package-lock.json` after pulling this change (it adds the `pg` package).
+**2. Have a Postgres database.** Either use your existing one (you need its connection string, `postgres://user:password@host/dbname`), or create one in Vercel: Dashboard → **Storage** → **Create Database** → **Neon** (Postgres) → connect it to your project. That adds `DATABASE_URL` for you.
 
-See `web/.env.example` for all variables.
+**3. Import the project.** Vercel dashboard → **Add New… → Project** → pick your GitHub repo → **Import**. Framework Preset should say **Next.js**. Leave **Root Directory** empty (`./`). If you set it to `web` for an earlier version, clear it under **Settings → General → Root Directory**.
+
+**4. Add environment variables.** Before the first deploy (or later under **Settings → Environment Variables**), add for Production, Preview and Development:
+
+- `DATABASE_URL` = your Postgres connection string (skip if the Neon integration already added it)
+- `SECRET_KEY` = a long random string, from `openssl rand -hex 32` or `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+- `ADMIN_PASSWORD` = the admin password you want (and `ADMIN_USERNAME` if you don't want `admin`)
+
+**5. Deploy.** Click **Deploy**. Environment variable changes only apply to new deployments, so after changing any later, go to **Deployments → ⋯ → Redeploy**.
+
+**6. Check it.** Open `https://YOUR-SITE.vercel.app/api/health`. You should see `"ok":true`, `"storage":"postgres"`, `"databaseUrlSet":true`, `"secretKeySet":true`, and counts of bettors, admins and markets. On the first visit the app creates any missing tables.
+
+**7. Sign in.**
+- Admin: go to `/admin`. Sign in with `ADMIN_USERNAME` (default `admin`) and `ADMIN_PASSWORD`, or with any admin already in your `admins` table.
+- Bettors: **Sign in** at the top right, with a username and bank account number from the `users` table. Admins can see and change these under **Bettors**.
+
+**8. Replace the demo markets.** In `/admin`, use **Remove all**, then **List a market** for each real one.
+
+### If something's wrong
+
+| What you see | What it means |
+| --- | --- |
+| `/api/health` is a 404 | Vercel is running old code, or the wrong folder. Check that the latest commit is deployed and Root Directory is empty. |
+| `/api/health` says `"ok":false` with an error | The message says why, most often a bad `DATABASE_URL`. For a TLS or certificate error, add `DATABASE_SSL=no-verify`. |
+| `"storage":"memory"` | No database URL is set. Add `DATABASE_URL` and redeploy. |
+| "There's no bettor called …" | That username isn't in the `users` table. |
+| "That bank account number doesn't match" | Wrong number for that bettor. An admin can see and change it. |
+| "There's no admin called …" | That username isn't in `admins`. Use `ADMIN_USERNAME` + `ADMIN_PASSWORD`. |
+| "…password_hash is in a format the app can't read" | The row uses another hash scheme, such as bcrypt. Set `ADMIN_USERNAME` to that name plus `ADMIN_PASSWORD` and redeploy, and the row is reset. |
+| Build fails on install | Run `npm install` locally and commit the updated `package-lock.json`. |
+
+The exact reason for every failed sign-in is also written to Vercel → your project → **Logs**.

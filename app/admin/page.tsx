@@ -19,6 +19,7 @@ function inTwoWeeks() {
 export default function AdminPage() {
   const router = useRouter();
   const [authed, setAuthed] = useState(false);
+  const [noAdmins, setNoAdmins] = useState(false);
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -48,6 +49,7 @@ export default function AdminPage() {
     ]);
     setMarkets(boot.markets ?? []);
     setAuthed(Boolean(admin.admin));
+    setNoAdmins(Boolean(admin.noAdmins));
     setBettors(admin.users ?? []);
   }
 
@@ -193,6 +195,12 @@ export default function AdminPage() {
             placeholder="password"
             autoComplete="current-password"
           />
+          {noAdmins ? (
+            <p className="mb-3 rounded-lg bg-surface-2 px-3 py-2 text-sm text-muted">
+              There are no admins in the <code>admins</code> table yet. Set <code>ADMIN_PASSWORD</code> (and
+              optionally <code>ADMIN_USERNAME</code>) in your environment variables, redeploy, and sign in with those.
+            </p>
+          ) : null}
           {error ? <p className="mb-2 text-sm text-no-text">{error}</p> : null}
           <button className="rounded-xl bg-yes-deep px-4 py-2 text-sm font-semibold text-white" type="submit">
             Sign in

@@ -1,7 +1,7 @@
 import { createHash, pbkdf2Sync, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 
-// Hashes are Werkzeug-compatible (generate_password_hash / check_password_hash in models.py),
-// so an Admin created by the Python side can sign in here and the other way around.
+// Hashes are Werkzeug-compatible (Python's generate_password_hash / check_password_hash),
+// so admin rows created that way can sign in here.
 
 const N = 32768;
 const R = 8;
@@ -40,4 +40,16 @@ export function verifyPassword(password: string, stored: string): boolean {
   }
   const expected = Buffer.from(expectedHex, "hex");
   return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
+export type HashKind = "scrypt" | "pbkdf2" | "sha256" | "plain" | "unsupported";
+
+/** What kind of value is in admins.password_hash? */
+export function hashKind(stored: string): HashKind {
+  if (stored.startsWith("scrypt:")) return "scrypt";
+  if (stored.startsWith("pbkdf2:")) return "pbkdf2";
+  if (/^[0-9a-f]{64}$/.test(stored)) return "sha256";
+  // Anything with a $ or : in it looks like a hash from some other scheme (bcrypt, argon2, ...).
+  if (/[$:]/.test(stored)) return "unsupported";
+  return "plain";
 }

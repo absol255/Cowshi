@@ -4,10 +4,10 @@ import type { Admin, Store, User } from "./types";
 
 // Postgres persistence
 // --------------------
-// Bettors and admins live in real tables that match models.py:
-//   users  (id, username, macho_bucks, created_at, bank_account_number)   <- models.User
-//   admins (id, username, password_hash)                                  <- models.Admin
-// If those tables already exist (for example created by the Flask app) they are used as they are.
+// Bettors and admins live in two real tables:
+//   users  (id, username, macho_bucks, created_at, bank_account_number)   <- bettors
+//   admins (id, username, password_hash)                                  <- admins
+// If those tables already exist they are used as they are, and existing rows are never deleted.
 // Everything else (events, markets, orders, positions, trades) is kept as one JSON document in
 // the cowshi_state table. Each save is one transaction: it checks the document's version, then
 // writes the document and any changed users/admins together, so they can't drift apart.
@@ -59,7 +59,7 @@ function userFromRow(r: Record<string, unknown>): User {
     id: Number(r.id),
     username: String(r.username),
     macho_bucks: Number(r.macho_bucks),
-    // models.User defaults this to 999 when it wasn't set.
+    // A missing bank_account_number counts as 999, the old default.
     bank_account_number: r.bank_account_number === null ? 999 : Number(r.bank_account_number),
     created_at: r.created_at ? String(r.created_at) : new Date().toISOString(),
   };
@@ -155,8 +155,8 @@ export function postgresBackend(rawUrl: string): Backend {
           }
         }
         const admins = (await c.query("SELECT COUNT(*)::int AS n FROM admins")).rows[0].n;
-        if (admins === 0) {
-          const a = seed.admins[0];
+        const a = seed.admins[0];
+        if (admins === 0 && a) {
           await c.query(
             `INSERT INTO admins (id, username, password_hash)
              SELECT COALESCE(MAX(id), 0) + 1, $1::varchar, $2::varchar FROM admins`,
@@ -260,7 +260,7 @@ export function postgresBackend(rawUrl: string): Backend {
   };
 }
 
-/** Keep the id sequences ahead of the ids we insert, so the Flask side can keep inserting too. */
+/** Keep the id sequences ahead of the ids we insert, so anything else that inserts into these tables keeps working. */
 async function syncSequences(c: PoolClient) {
   for (const table of ["users", "admins"]) {
     await c.query(
